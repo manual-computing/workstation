@@ -16,7 +16,8 @@ import type {
 import type { TerminalExitInfo, TerminalForeground } from "../terminal/terminal.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 
-const AT_PROMPT: TerminalForeground = { commandState: "prompt" };
+const AT_PROMPT: TerminalForeground = { commandState: "prompt", programStatus: null };
+const RUNNING_COMMAND: TerminalForeground = { commandState: "running", programStatus: null };
 
 const NOTHING_ELSE = {
   commands: [],
@@ -359,8 +360,8 @@ describe("HostActivityMonitor", () => {
   describe("commands", () => {
     it("lists a terminal running a command or never at a prompt, and drops it at the prompt", () => {
       const { terminals, monitor } = setup();
-      terminals.open("build", null, { commandState: "running" });
-      terminals.open("tui", null, { commandState: "unknown" });
+      terminals.open("build", null, RUNNING_COMMAND);
+      terminals.open("tui", null, { commandState: "unknown", programStatus: null });
       terminals.open("shell");
 
       expect(monitor.snapshot().commands).toEqual([
@@ -374,16 +375,71 @@ describe("HostActivityMonitor", () => {
 
     it("skips exited terminals", () => {
       const { terminals, monitor } = setup();
-      terminals.open("t-1", null, { commandState: "running" });
+      terminals.open("t-1", null, RUNNING_COMMAND);
       terminals.exit("t-1");
 
       expect(monitor.snapshot().commands).toEqual([]);
+    });
+
+    it("takes a running terminal out of commands while OSC 7501 reports a status", () => {
+      const { terminals, monitor } = setup();
+      terminals.open("idle", null, { commandState: "running", programStatus: "idle" });
+      terminals.open("done", null, { commandState: "running", programStatus: "done" });
+      terminals.open("error", null, { commandState: "running", programStatus: "error" });
+      terminals.open("plain", null, RUNNING_COMMAND);
+
+      expect(monitor.snapshot().commands).toEqual([{ terminalId: "plain", reason: "running" }]);
+    });
+
+    it("keeps a working terminal in busy instead of commands, and a blocked one in waiting", () => {
+      const { terminals, monitor } = setup();
+      terminals.open(
+        "working",
+        { state: "working", changedAt: 1 },
+        { commandState: "running", programStatus: "working" },
+      );
+      terminals.open(
+        "blocked",
+        { state: "attention", attentionReason: "needs_input", changedAt: 1 },
+        { commandState: "running", programStatus: "blocked" },
+      );
+      terminals.transition("working", { state: "working", changedAt: 2 });
+
+      const snapshot = monitor.snapshot();
+      expect(snapshot.commands).toEqual([]);
+      expect(snapshot.busy).toEqual([{ kind: "terminal", id: "working", reason: "working" }]);
+      expect(snapshot.waiting).toEqual([
+        { kind: "terminal", id: "blocked", reason: "needs_input" },
+      ]);
+    });
+
+    it("never lists a service terminal in commands, even while it reports status", () => {
+      const { terminals, scripts, monitor } = setup();
+      terminals.open(
+        "web",
+        { state: "working", changedAt: 1 },
+        { commandState: "running", programStatus: "working" },
+      );
+      scripts.push({
+        workspaceId: "ws",
+        scriptName: "web",
+        type: "service",
+        lifecycle: "running",
+        terminalId: "web",
+        exitCode: null,
+      });
+
+      const snapshot = monitor.snapshot();
+      expect(snapshot.commands).toEqual([]);
+      expect(snapshot.services).toEqual([
+        { terminalId: "web", workspaceId: "ws", scriptName: "web" },
+      ]);
     });
   });
 
   it("lists running service scripts under services instead of commands", () => {
     const { terminals, scripts, monitor } = setup();
-    const running: TerminalForeground = { commandState: "running" };
+    const running: TerminalForeground = RUNNING_COMMAND;
     terminals.open("web", null, running);
     terminals.open("old-web", null, running);
     terminals.open("build", null, running);
@@ -439,7 +495,7 @@ describe("HostActivityMonitor", () => {
     terminals.open(
       "web",
       { state: "attention", attentionReason: "needs_input", changedAt: 1 },
-      { commandState: "running" },
+      { commandState: "running", programStatus: null },
     );
     scripts.push({
       workspaceId: "ws",

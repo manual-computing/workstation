@@ -189,8 +189,16 @@ export class HostActivityMonitor {
         });
         continue;
       }
-      const { commandState } = terminal.getForeground();
+      const { commandState, programStatus } = terminal.getForeground();
       if (commandState === "prompt") {
+        continue;
+      }
+      // OSC 7501 refines a running foreground: a program that reports its own
+      // status owns the verdict. `working` is already in `busy`, `blocked`
+      // shows up in `waiting` through its attention activity, and `idle`,
+      // `done` or `error` mean the run is over. Failing safe: without a
+      // record, or after `clear` removed it, the terminal stays listed.
+      if (programStatus !== null) {
         continue;
       }
       commands.push({ terminalId: terminal.id, reason: commandState });

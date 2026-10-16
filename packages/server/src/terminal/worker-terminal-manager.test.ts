@@ -716,18 +716,18 @@ it("seeds the foreground from terminalCreated and follows terminalForegroundChan
       cwd: "/workspace",
       workspaceId: "ws-test",
       activity: null,
-      foreground: { commandState: "prompt" },
+      foreground: { commandState: "prompt", programStatus: null },
     },
     state: createTerminalState(),
   });
   const [session] = manager.listTerminals();
-  expect(session.getForeground()).toEqual({ commandState: "prompt" });
+  expect(session.getForeground()).toEqual({ commandState: "prompt", programStatus: null });
 
   const seen: TerminalForeground[] = [];
   session.onForegroundChange((foreground) => {
     seen.push(foreground);
   });
-  const running: TerminalForeground = { commandState: "running" };
+  const running: TerminalForeground = { commandState: "running", programStatus: null };
   worker.emitWorkerMessage({
     type: "terminalForegroundChange",
     terminalId: "terminal-a",
